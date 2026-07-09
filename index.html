@@ -182,9 +182,10 @@
   .overlay {
     position: fixed; inset: 0; background: rgba(10,9,15,.78); backdrop-filter: blur(4px);
     display: none; align-items: flex-start; justify-content: center; padding: 30px 14px; z-index: 50;
-    overflow-y: auto;
+    overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   }
   .overlay.show { display: flex; }
+  body:has(.overlay.show) { overflow: hidden; }
   .modal {
     background: var(--bg-soft); border: 1px solid var(--border); border-radius: 20px;
     width: 100%; max-width: 500px; padding: 24px; margin-bottom: 30px;
@@ -256,8 +257,8 @@
     .grid { grid-template-columns: 1fr 1fr; gap: 10px; }
     .card-inner { padding: 12px; }
     .card-photo { height: 90px; }
-    .overlay { padding: 14px 8px; align-items: flex-end; }
-    .modal { border-radius: 20px 20px 14px 14px; }
+    .overlay { padding: 14px 8px; }
+    .modal { border-radius: 20px 20px 14px 14px; margin-top: auto; margin-bottom: 0; }
     .desktop-add { display: none; }
     .fab { display: block; }
     .hdr-btn-label { display: none; }
