@@ -206,6 +206,8 @@
     background: var(--bg); color: var(--text-dim); cursor: pointer; font-size: 14px;
   }
   .type-toggle button.active { border-color: var(--gold); background: var(--gold-soft); color: var(--gold); font-weight: 600; }
+  .view-tabs { margin: 16px 0 -4px; }
+  .view-tabs button { min-height: 44px; font-size: 14px; }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
   .row2 { display: flex; gap: 10px; }
   .row2 .field { flex: 1; }
@@ -284,8 +286,14 @@
     <button class="btn" onclick="exportData()" title="Salva un backup dei tuoi dati">⬇<span class="hdr-btn-label"> Backup</span></button>
     <button class="btn" onclick="document.getElementById('importFile').click()" title="Ripristina da backup">⬆<span class="hdr-btn-label"> Importa</span></button>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
-    <button class="btn primary desktop-add" onclick="openModal()">+ Aggiungi</button>
+    <button class="btn primary desktop-add" onclick="addNew()">+ Aggiungi</button>
   </header>
+
+  <div class="type-toggle view-tabs">
+    <button id="viewSiti" class="active" onclick="setView('siti')">🛍️ Siti</button>
+    <button id="viewProdotti" onclick="setView('prodotti')">📦 Prodotti</button>
+    <button id="viewNote" onclick="setView('note')">📝 Note</button>
+  </div>
 
   <div class="searchbar">
     <span class="icon">🔍</span>
@@ -309,7 +317,7 @@
   <div id="mainSection"></div>
 </div>
 
-<button class="fab" onclick="openModal()" title="Aggiungi">+</button>
+<button class="fab" onclick="addNew()" title="Aggiungi">+</button>
 
 <!-- Setup / impostazioni sincronizzazione -->
 <div class="overlay" id="setupOverlay">
@@ -418,6 +426,10 @@
 <div class="overlay" id="prodOverlay" onclick="if(event.target===this) closeProdModal()">
   <div class="modal">
     <h3 id="prodModalTitle">Nuovo prodotto / link</h3>
+    <div class="field" id="pParentField" style="display:none">
+      <label>Di quale sito è? *</label>
+      <select id="pParent"></select>
+    </div>
     <div class="field">
       <label>Nome del prodotto *</label>
       <input id="pTitle" placeholder="Es. Sneakers modello X, taglia 42">
@@ -698,6 +710,7 @@ const STATUS = {
   coming: { label: '📅 In arrivo',    cls: 'st-coming' },
   pre:    { label: '🔮 Preordine',    cls: 'st-pre' }
 };
+let activeView = 'siti';
 let activeFilter = 'tutti';
 let editingId = null;
 let modalType = 'sito';
@@ -916,7 +929,18 @@ function renderDetail() {
 // ---------- product links ----------
 function openProdModal(prodId) {
   editingProdId = prodId || null;
-  const it = getItem(detailId);
+  const parentField = document.getElementById('pParentField');
+  if (detailId) {
+    parentField.style.display = 'none';
+  } else {
+    const sites = state.items.filter(i => i.type === 'sito');
+    if (!sites.length) { toast('Prima salva almeno un sito (scheda Siti, pulsante +)'); return; }
+    document.getElementById('pParent').innerHTML = sites
+      .slice().sort((a,b) => a.title.localeCompare(b.title,'it'))
+      .map(s => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+    parentField.style.display = '';
+  }
+  const it = detailId ? getItem(detailId) : null;
   if (prodId) {
     const p = it.links.find(x => x.id === prodId);
     document.getElementById('prodModalTitle').textContent = 'Modifica prodotto';
@@ -928,11 +952,15 @@ function openProdModal(prodId) {
   }
   document.getElementById('prodOverlay').classList.add('show');
 }
-function closeProdModal() { document.getElementById('prodOverlay').classList.remove('show'); }
+function closeProdModal() {
+  document.getElementById('prodOverlay').classList.remove('show');
+  if (!document.getElementById('detailOverlay').classList.contains('show')) detailId = null;
+}
 function saveProd() {
   const title = pTitle.value.trim();
   if (!title) { toast('Il nome è obbligatorio'); return; }
-  const it = getItem(detailId);
+  const it = detailId ? getItem(detailId) : getItem(document.getElementById('pParent').value);
+  if (!it) { toast('Scegli il sito di appartenenza'); return; }
   const data = {
     title,
     url: normUrl(pUrl.value),
@@ -980,16 +1008,46 @@ function renderRiscopri() {
     </div>`;
 }
 
+// ---------- viste ----------
+function setView(v) {
+  activeView = v;
+  activeFilter = 'tutti';
+  document.getElementById('viewSiti').classList.toggle('active', v==='siti');
+  document.getElementById('viewProdotti').classList.toggle('active', v==='prodotti');
+  document.getElementById('viewNote').classList.toggle('active', v==='note');
+  render();
+}
+function addNew() {
+  if (activeView==='prodotti') { openProdModal(); return; }
+  openModal();
+  if (activeView==='note') setType('nota');
+}
+
 // ---------- chips ----------
 function renderChips() {
-  const base = [
-    { id:'tutti', label:'Tutti' },
-    { id:'_siti', label:'🛍️ Siti' },
-    { id:'_note', label:'📝 Note' },
-    { id:'_pref', label:'⭐ Preferiti' },
-    { id:'_subito', label:'🔥 Da comprare' },
-    { id:'_vpn', label:'🔒 VPN' },
-  ];
+  let base;
+  if (activeView==='prodotti') {
+    base = [
+      { id:'tutti', label:'Tutti' },
+      { id:'st:ok', label:'✅ Disponibili' },
+      { id:'st:low', label:'⚠️ Pochi pezzi' },
+      { id:'st:out', label:'❌ Esauriti' },
+      { id:'st:coming', label:'📅 In arrivo' },
+      { id:'st:pre', label:'🔮 Preordine' },
+    ];
+  } else if (activeView==='note') {
+    base = [
+      { id:'tutti', label:'Tutte' },
+      { id:'_pref', label:'⭐ Preferite' },
+    ];
+  } else {
+    base = [
+      { id:'tutti', label:'Tutti' },
+      { id:'_pref', label:'⭐ Preferiti' },
+      { id:'_subito', label:'🔥 Da comprare' },
+      { id:'_vpn', label:'🔒 VPN' },
+    ];
+  }
   const cats = categories().map(c => ({ id:'cat:'+c, label:c }));
   document.getElementById('chips').innerHTML = [...base, ...cats].map(c =>
     `<div class="chip ${activeFilter===c.id?'active':''}" onclick="activeFilter='${esc(c.id).replace(/'/g,"\\'")}';render()">${esc(c.label)}</div>`
@@ -1044,12 +1102,16 @@ function cardHtml(it) {
 
 function render() {
   renderChips();
-  renderRiscopri();
+  const rb = document.getElementById('riscopriBox');
+  if (activeView==='siti') { rb.style.display = ''; renderRiscopri(); }
+  else { rb.style.display = 'none'; }
 
   const q = document.getElementById('search').value.trim().toLowerCase();
+  if (activeView==='prodotti') { renderProducts(q); return; }
+
   let list = state.items.filter(it => {
-    if (activeFilter==='_siti' && it.type!=='sito') return false;
-    if (activeFilter==='_note' && it.type!=='nota') return false;
+    if (activeView==='siti' && it.type!=='sito') return false;
+    if (activeView==='note' && it.type!=='nota') return false;
     if (activeFilter==='_pref' && !it.pinned) return false;
     if (activeFilter==='_subito' && it.priority!=='subito') return false;
     if (activeFilter==='_vpn' && !it.vpn) return false;
@@ -1090,11 +1152,82 @@ function render() {
       Tutto resterà qui, visibile, anche tra anni.</p>
     </div>`;
   } else if (list.length === 0) {
-    main.innerHTML = `<div class="empty"><div class="big">🔍</div><h3>Nessun risultato</h3><p>Prova con un'altra parola o un altro filtro.</p></div>`;
+    const noNotes = activeView==='note' && !state.items.some(i => i.type==='nota');
+    main.innerHTML = noNotes
+      ? `<div class="empty"><div class="big">📝</div><h3>Nessuna nota ancora</h3><p>Premi <b>+</b> per scrivere la prima.</p></div>`
+      : `<div class="empty"><div class="big">🔍</div><h3>Nessun risultato</h3><p>Prova con un'altra parola o un altro filtro.</p></div>`;
   } else {
     main.innerHTML = (pinned.length ? '<h2 class="section">Tutti gli elementi</h2>' : '') +
       `<div class="grid">${rest.map(cardHtml).join('')}</div>`;
   }
+}
+
+// ---------- vista prodotti ----------
+function prodCardHtml(entry) {
+  const p = entry.p, parent = entry.parent;
+  const openBtn = p.url ? `<button class="icon-btn open" onclick="window.open('${esc(p.url)}','_blank')">Apri ↗</button>` : '';
+  return `
+  <div class="card">
+    <div class="card-inner">
+      <div class="card-top" onclick="openDetail('${parent.id}')">
+        <div class="favicon">${logoImg(parent, 64)}</div>
+        <div>
+          <div class="card-title">${esc(p.title)}</div>
+          <div class="card-domain">da ${esc(parent.title)}</div>
+        </div>
+      </div>
+      ${p.status ? `<div>${statusBanner(p.status, p.statusNote)}</div>` : ''}
+      ${p.note ? `<div class="card-note">${esc(p.note)}</div>` : ''}
+      <div class="card-meta">
+        ${parent.category ? `<span class="mini-chip">${esc(parent.category)}</span>` : ''}
+        ${p.price ? `<span class="mini-chip gold">${esc(p.price)}</span>` : ''}
+        ${parent.vpn ? '<span class="mini-chip vpn">🔒 VPN</span>' : ''}
+      </div>
+      ${p.createdAt ? `<div class="card-date">Salvato il ${fmtDate(p.createdAt)}</div>` : ''}
+      <div class="card-actions">
+        ${openBtn}
+        <span style="flex:1"></span>
+        <button class="icon-btn" title="Apri scheda del sito" onclick="openDetail('${parent.id}')">📂</button>
+        <button class="icon-btn" title="Modifica" onclick="editProdFromList('${parent.id}','${p.id}')">✏️</button>
+        <button class="icon-btn" title="Elimina" onclick="delProdFromList('${parent.id}','${p.id}')">🗑️</button>
+      </div>
+    </div>
+  </div>`;
+}
+function editProdFromList(parentId, prodId) { detailId = parentId; openProdModal(prodId); }
+function delProdFromList(parentId, prodId) { detailId = parentId; delProd(prodId); detailId = null; }
+
+function renderProducts(q) {
+  document.getElementById('pinnedSection').innerHTML = '';
+  let prods = [];
+  state.items.forEach(it => {
+    if (it.type === 'sito') (it.links||[]).forEach(p => prods.push({ p, parent: it }));
+  });
+  prods = prods.filter(({ p, parent }) => {
+    if (activeFilter.startsWith('st:') && p.status !== activeFilter.slice(3)) return false;
+    if (activeFilter.startsWith('cat:') && parent.category !== activeFilter.slice(4)) return false;
+    if (q) {
+      const hay = (p.title+' '+(p.note||'')+' '+(p.statusNote||'')+' '+parent.title+' '+(parent.category||'')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const sort = document.getElementById('sort').value;
+  const stRank = s => ({ low:0, coming:1, pre:2, ok:3, '':4, out:5 })[s||''] ?? 4;
+  prods.sort((a,b) => {
+    if (sort==='old') return (a.p.createdAt||0) - (b.p.createdAt||0);
+    if (sort==='az') return a.p.title.localeCompare(b.p.title,'it');
+    if (sort==='prio') return stRank(a.p.status) - stRank(b.p.status) || (b.p.createdAt||0) - (a.p.createdAt||0);
+    return (b.p.createdAt||0) - (a.p.createdAt||0);
+  });
+  document.getElementById('count').textContent =
+    prods.length === 0 ? '' : prods.length === 1 ? '1 prodotto' : `${prods.length} prodotti`;
+  const main = document.getElementById('mainSection');
+  if (!prods.length) {
+    main.innerHTML = `<div class="empty"><div class="big">📦</div><h3>Nessun prodotto qui</h3><p>Premi <b>+</b> per aggiungerne uno scegliendo il sito,<br>oppure aprilo dalla scheda di un sito.</p></div>`;
+    return;
+  }
+  main.innerHTML = `<div class="grid">${prods.map(prodCardHtml).join('')}</div>`;
 }
 
 // ---------- backup ----------
@@ -1134,7 +1267,7 @@ function importData(ev) {
 // ---------- init ----------
 loadLocal();
 riscopriIndex = Math.floor(Math.random() * Math.max(state.items.length, 1));
-render();
+setView('siti');
 if (cfg) { setSync('sync', 'Sincronizzo…'); syncNow(false); }
 else { setSync('', 'Solo locale'); showSetupIfNeeded(); }
 document.addEventListener('visibilitychange', () => {
