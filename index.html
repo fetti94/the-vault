@@ -375,8 +375,12 @@
       <input id="fTitle" placeholder="Es. Negozio scarpe artigianali">
     </div>
     <div class="field" id="urlField">
-      <label>Indirizzo del sito (URL)</label>
+      <label id="urlLabel">Indirizzo del sito (URL)</label>
       <input id="fUrl" placeholder="Es. www.esempio.it" autocapitalize="none" autocorrect="off">
+    </div>
+    <div class="field" id="siteLinkField" style="display:none">
+      <label>Collega a un sito (facoltativo)</label>
+      <select id="fSite"></select>
     </div>
     <div class="field">
       <label>Categoria</label>
@@ -427,8 +431,12 @@
   <div class="modal">
     <h3 id="prodModalTitle">Nuovo prodotto / link</h3>
     <div class="field" id="pParentField" style="display:none">
-      <label>Di quale sito è? *</label>
+      <label>Di quale sito è? (facoltativo)</label>
       <select id="pParent"></select>
+    </div>
+    <div class="field" id="pCatField" style="display:none">
+      <label>Categoria</label>
+      <input id="pCat" list="catList" placeholder="Es. Tech, Vestiti, Giappone…">
     </div>
     <div class="field">
       <label>Nome del prodotto *</label>
@@ -783,19 +791,24 @@ function removePhoto() { modalPhoto = null; showPhotoPreview(); }
 // ---------- modal item ----------
 function setType(t) {
   modalType = t;
-  document.getElementById('typeSito').classList.toggle('active', t==='sito');
-  document.getElementById('typeNota').classList.toggle('active', t==='nota');
-  const showShop = t==='sito' ? '' : 'none';
-  document.getElementById('urlField').style.display = showShop;
-  document.getElementById('shopFields').style.display = t==='sito' ? 'flex' : 'none';
-  document.getElementById('vpnField').style.display = showShop;
-  document.getElementById('photoField').style.display = showShop;
+  const isSito = t==='sito';
+  document.getElementById('typeSito').classList.toggle('active', isSito);
+  document.getElementById('typeNota').classList.toggle('active', !isSito);
+  document.getElementById('urlLabel').textContent = isSito ? 'Indirizzo del sito (URL)' : 'Link (facoltativo — es. articolo da leggere)';
+  document.getElementById('shopFields').style.display = isSito ? 'flex' : 'none';
+  document.getElementById('vpnField').style.display = isSito ? '' : 'none';
+  document.getElementById('photoField').style.display = isSito ? '' : 'none';
+  document.getElementById('siteLinkField').style.display = isSito ? 'none' : '';
 }
 function openModal(id) {
   editingId = id || null;
   modalPhoto = null;
   const dl = document.getElementById('catList');
   dl.innerHTML = categories().map(c => `<option value="${esc(c)}">`).join('');
+  const sSel = document.getElementById('fSite');
+  sSel.innerHTML = '<option value="">— Nessuno —</option>' + state.items
+    .filter(i => i.type==='sito').slice().sort((a,b) => a.title.localeCompare(b.title,'it'))
+    .map(s => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
   if (id) {
     const it = getItem(id);
     document.getElementById('modalTitle').textContent = 'Modifica';
@@ -803,12 +816,14 @@ function openModal(id) {
     fTitle.value = it.title; fUrl.value = it.url || ''; fCat.value = it.category || '';
     fNote.value = it.note || ''; fPrice.value = it.price || ''; fPrio.value = it.priority || '';
     fVpn.checked = !!it.vpn;
+    sSel.value = it.siteId || '';
     modalPhoto = it.image || null;
   } else {
     document.getElementById('modalTitle').textContent = 'Nuovo elemento';
     setType('sito');
     fTitle.value = fUrl.value = fCat.value = fNote.value = fPrice.value = ''; fPrio.value = '';
     fVpn.checked = false;
+    sSel.value = '';
   }
   showPhotoPreview();
   document.getElementById('overlay').classList.add('show');
@@ -821,7 +836,8 @@ function saveItem() {
   const data = {
     type: modalType,
     title,
-    url: modalType==='sito' ? normUrl(fUrl.value) : '',
+    url: normUrl(fUrl.value),
+    siteId: modalType==='nota' ? (document.getElementById('fSite').value || '') : '',
     category: fCat.value.trim(),
     note: fNote.value.trim(),
     price: modalType==='sito' ? fPrice.value.trim() : '',
@@ -866,6 +882,8 @@ function toggleExpand(el) { el.closest('.card').classList.toggle('expanded'); }
 
 // ---------- detail (site as container) ----------
 function openDetail(id) {
+  const target = getItem(id);
+  if (target && target.type === 'prodotto') { detailId = null; openProdModal(id); return; }
   detailId = id;
   visit(id);
   renderDetail();
@@ -897,6 +915,18 @@ function renderDetail() {
       </div>
     </div>`;
   }).join('');
+  const linkedNotes = it.type==='sito' ? state.items.filter(n => n.type==='nota' && n.siteId === it.id) : [];
+  const notesHtml = linkedNotes.map(n => `
+    <div class="prod">
+      <div class="prod-top"><span class="prod-title">📝 ${esc(n.title)}</span></div>
+      ${n.note ? `<div class="prod-note">${esc(n.note)}</div>` : ''}
+      <div class="prod-actions">
+        ${n.url ? `<button class="icon-btn open" onclick="window.open('${esc(n.url)}','_blank')">Leggi ↗</button>` : ''}
+        <span class="spacer"></span>
+        <button class="icon-btn" title="Modifica" onclick="openModal('${n.id}')">✏️</button>
+        <button class="icon-btn" title="Elimina" onclick="delItem('${n.id}')">🗑️</button>
+      </div>
+    </div>`).join('');
   document.getElementById('detailBody').innerHTML = `
     ${it.image ? `<img class="detail-photo" src="${it.image}">` : ''}
     <div class="detail-head">
@@ -913,10 +943,16 @@ function renderDetail() {
       ${it.vpn ? '<span class="mini-chip vpn">🔒 Solo con VPN</span>' : ''}
     </div>
     ${it.note ? `<div class="detail-note">${esc(it.note)}</div>` : ''}
-    ${it.url ? `<button class="btn primary" style="width:100%;margin-top:6px" onclick="visit('${it.id}');window.open('${esc(it.url)}','_blank')">${it.vpn ? '🔒 Apri sito (ricorda la VPN!)' : 'Apri sito ↗'}</button>` : ''}
+    ${it.url ? `<button class="btn primary" style="width:100%;margin-top:6px" onclick="visit('${it.id}');window.open('${esc(it.url)}','_blank')">${it.vpn ? '🔒 Apri sito (ricorda la VPN!)' : (it.type==='nota' ? 'Apri link ↗' : 'Apri sito ↗')}</button>` : ''}
+    ${it.type==='nota' && it.siteId && getItem(it.siteId) ? `<button class="btn small" style="margin-top:10px" onclick="openDetail('${it.siteId}')">📎 Vai al sito: ${esc(getItem(it.siteId).title)}</button>` : ''}
+    ${it.type==='sito' ? `
     <div class="subhead">📦 Prodotti e link salvati (${(it.links||[]).length})</div>
     <div class="prod-list">${prods || '<div style="color:var(--text-dim);font-size:13px;padding:6px 0">Nessun prodotto ancora. Salva qui i link dei singoli articoli che ti interessano di questo sito.</div>'}</div>
     <button class="btn ghost" onclick="openProdModal()">+ Aggiungi prodotto o link</button>
+    <div class="subhead">📝 Note collegate (${linkedNotes.length})</div>
+    <div class="prod-list">${notesHtml || '<div style="color:var(--text-dim);font-size:13px;padding:6px 0">Nessuna nota collegata. Utile per salvare articoli da leggere o appunti su questo sito.</div>'}</div>
+    <button class="btn ghost" onclick="addNoteForSite('${it.id}')">+ Aggiungi nota collegata</button>
+    ` : ''}
     <div class="modal-actions">
       <button class="btn small" onclick="togglePin('${it.id}');renderDetail()">${it.pinned ? '⭐ Fissato' : '☆ Fissa in cima'}</button>
       <button class="btn small" onclick="openModal('${it.id}')">✏️ Modifica</button>
@@ -930,19 +966,25 @@ function renderDetail() {
 function openProdModal(prodId) {
   editingProdId = prodId || null;
   const parentField = document.getElementById('pParentField');
+  const catField = document.getElementById('pCatField');
+  let p = null;
   if (detailId) {
     parentField.style.display = 'none';
+    catField.style.display = 'none';
+    if (prodId) p = getItem(detailId).links.find(x => x.id === prodId);
   } else {
-    const sites = state.items.filter(i => i.type === 'sito');
-    if (!sites.length) { toast('Prima salva almeno un sito (scheda Siti, pulsante +)'); return; }
-    document.getElementById('pParent').innerHTML = sites
-      .slice().sort((a,b) => a.title.localeCompare(b.title,'it'))
-      .map(s => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+    const sites = state.items.filter(i => i.type === 'sito')
+      .slice().sort((a,b) => a.title.localeCompare(b.title,'it'));
+    document.getElementById('pParent').innerHTML = '<option value="">— Nessun sito —</option>' +
+      sites.map(s => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+    document.getElementById('pParent').value = '';
+    document.getElementById('catList').innerHTML = categories().map(c => `<option value="${esc(c)}">`).join('');
     parentField.style.display = '';
+    catField.style.display = '';
+    document.getElementById('pCat').value = '';
+    if (prodId) { p = getItem(prodId); if (p) document.getElementById('pCat').value = p.category || ''; }
   }
-  const it = detailId ? getItem(detailId) : null;
-  if (prodId) {
-    const p = it.links.find(x => x.id === prodId);
+  if (prodId && p) {
     document.getElementById('prodModalTitle').textContent = 'Modifica prodotto';
     pTitle.value = p.title; pUrl.value = p.url || ''; pStatus.value = p.status || '';
     pStatusNote.value = p.statusNote || ''; pPrice.value = p.price || ''; pNote.value = p.note || '';
@@ -959,8 +1001,6 @@ function closeProdModal() {
 function saveProd() {
   const title = pTitle.value.trim();
   if (!title) { toast('Il nome è obbligatorio'); return; }
-  const it = detailId ? getItem(detailId) : getItem(document.getElementById('pParent').value);
-  if (!it) { toast('Scegli il sito di appartenenza'); return; }
   const data = {
     title,
     url: normUrl(pUrl.value),
@@ -969,12 +1009,39 @@ function saveProd() {
     price: pPrice.value.trim(),
     note: pNote.value.trim()
   };
-  if (editingProdId) {
-    Object.assign(it.links.find(x => x.id === editingProdId), data);
+  if (detailId) {
+    // prodotto dentro la scheda di un sito
+    const it = getItem(detailId);
+    if (editingProdId) Object.assign(it.links.find(x => x.id === editingProdId), data);
+    else it.links.push({ id: uid(), ...data, createdAt: Date.now() });
+    touch(it);
   } else {
-    it.links.push({ id: uid(), ...data, createdAt: Date.now() });
+    const parentId = document.getElementById('pParent').value;
+    const cat = document.getElementById('pCat').value.trim();
+    if (editingProdId) {
+      const st = getItem(editingProdId); // prodotto libero esistente
+      if (st) {
+        if (parentId) {
+          // spostato dentro un sito
+          const site = getItem(parentId);
+          site.links.push({ id: uid(), ...data, createdAt: st.createdAt || Date.now() });
+          touch(site);
+          state.deleted[st.id] = Date.now();
+          state.items = state.items.filter(x => x.id !== st.id);
+        } else {
+          Object.assign(st, data);
+          st.category = cat;
+          touch(st);
+        }
+      }
+    } else if (parentId) {
+      const site = getItem(parentId);
+      site.links.push({ id: uid(), ...data, createdAt: Date.now() });
+      touch(site);
+    } else {
+      state.items.push({ id: uid(), type: 'prodotto', ...data, category: cat, links: [], createdAt: Date.now(), updatedAt: Date.now(), views: 0 });
+    }
   }
-  touch(it);
   persist(); closeProdModal(); renderDetail(); render();
   toast('Salvato ✓');
 }
@@ -1022,6 +1089,11 @@ function addNew() {
   openModal();
   if (activeView==='note') setType('nota');
 }
+function addNoteForSite(siteId) {
+  openModal();
+  setType('nota');
+  document.getElementById('fSite').value = siteId;
+}
 
 // ---------- chips ----------
 function renderChips() {
@@ -1064,6 +1136,9 @@ function cardHtml(it) {
   const vpn = it.vpn ? '<span class="mini-chip vpn">🔒 VPN</span>' : '';
   const nProd = (it.links||[]).length;
   const prodChip = nProd ? `<span class="mini-chip gold">📦 ${nProd} prodott${nProd===1?'o':'i'}</span>` : '';
+  const nNotes = it.type==='sito' ? state.items.filter(n => n.type==='nota' && n.siteId === it.id).length : 0;
+  const noteChip = nNotes ? `<span class="mini-chip">📝 ${nNotes} not${nNotes===1?'a':'e'}</span>` : '';
+  const linkedSite = it.type==='nota' && it.siteId ? getItem(it.siteId) : null;
   let banner = '';
   const stOrder = ['low','coming','pre','out','ok'];
   for (const s of stOrder) {
@@ -1082,11 +1157,12 @@ function cardHtml(it) {
         <div>
           <div class="card-title">${esc(it.title)}</div>
           ${dom ? `<div class="card-domain">${esc(dom)}</div>` : ''}
+          ${linkedSite ? `<div class="card-domain">📎 ${esc(linkedSite.title)}</div>` : ''}
         </div>
       </div>
       ${banner ? `<div>${banner}</div>` : ''}
       ${it.note ? `<div class="card-note" onclick="toggleExpand(this)">${esc(it.note)}</div>` : ''}
-      <div class="card-meta">${cat}${price}${prio}${vpn}${prodChip}</div>
+      <div class="card-meta">${cat}${price}${prio}${vpn}${prodChip}${noteChip}</div>
       <div class="card-date">Salvato il ${fmtDate(it.createdAt)}</div>
       <div class="card-actions">
         ${openBtn}
@@ -1166,48 +1242,63 @@ function render() {
 function prodCardHtml(entry) {
   const p = entry.p, parent = entry.parent;
   const openBtn = p.url ? `<button class="icon-btn open" onclick="window.open('${esc(p.url)}','_blank')">Apri ↗</button>` : '';
+  const cat = p.category || (parent && parent.category) || '';
+  const dom = !parent && p.url ? domainOf(p.url) : '';
+  const pid = parent ? parent.id : '';
+  const topClick = parent ? `openDetail('${parent.id}')` : `editProdFromList('','${p.id}')`;
   return `
   <div class="card">
     <div class="card-inner">
-      <div class="card-top" onclick="openDetail('${parent.id}')">
-        <div class="favicon">${logoImg(parent, 64)}</div>
+      <div class="card-top" onclick="${topClick}">
+        <div class="favicon">${logoImg(parent || p, 64)}</div>
         <div>
           <div class="card-title">${esc(p.title)}</div>
-          <div class="card-domain">da ${esc(parent.title)}</div>
+          ${parent ? `<div class="card-domain">da ${esc(parent.title)}</div>` : (dom ? `<div class="card-domain">${esc(dom)}</div>` : '')}
         </div>
       </div>
       ${p.status ? `<div>${statusBanner(p.status, p.statusNote)}</div>` : ''}
       ${p.note ? `<div class="card-note">${esc(p.note)}</div>` : ''}
       <div class="card-meta">
-        ${parent.category ? `<span class="mini-chip">${esc(parent.category)}</span>` : ''}
+        ${cat ? `<span class="mini-chip">${esc(cat)}</span>` : ''}
         ${p.price ? `<span class="mini-chip gold">${esc(p.price)}</span>` : ''}
-        ${parent.vpn ? '<span class="mini-chip vpn">🔒 VPN</span>' : ''}
+        ${parent && parent.vpn ? '<span class="mini-chip vpn">🔒 VPN</span>' : ''}
       </div>
       ${p.createdAt ? `<div class="card-date">Salvato il ${fmtDate(p.createdAt)}</div>` : ''}
       <div class="card-actions">
         ${openBtn}
         <span style="flex:1"></span>
-        <button class="icon-btn" title="Apri scheda del sito" onclick="openDetail('${parent.id}')">📂</button>
-        <button class="icon-btn" title="Modifica" onclick="editProdFromList('${parent.id}','${p.id}')">✏️</button>
-        <button class="icon-btn" title="Elimina" onclick="delProdFromList('${parent.id}','${p.id}')">🗑️</button>
+        ${parent ? `<button class="icon-btn" title="Apri scheda del sito" onclick="openDetail('${parent.id}')">📂</button>` : ''}
+        <button class="icon-btn" title="Modifica" onclick="editProdFromList('${pid}','${p.id}')">✏️</button>
+        <button class="icon-btn" title="Elimina" onclick="delProdFromList('${pid}','${p.id}')">🗑️</button>
       </div>
     </div>
   </div>`;
 }
-function editProdFromList(parentId, prodId) { detailId = parentId; openProdModal(prodId); }
-function delProdFromList(parentId, prodId) { detailId = parentId; delProd(prodId); detailId = null; }
+function editProdFromList(parentId, prodId) { detailId = parentId || null; openProdModal(prodId); }
+function delProdFromList(parentId, prodId) {
+  if (parentId) { detailId = parentId; delProd(prodId); detailId = null; return; }
+  const p = getItem(prodId);
+  if (p && confirm(`Eliminare "${p.title}"?`)) {
+    state.deleted[prodId] = Date.now();
+    state.items = state.items.filter(x => x.id !== prodId);
+    persist(); render();
+    toast('Eliminato');
+  }
+}
 
 function renderProducts(q) {
   document.getElementById('pinnedSection').innerHTML = '';
   let prods = [];
   state.items.forEach(it => {
     if (it.type === 'sito') (it.links||[]).forEach(p => prods.push({ p, parent: it }));
+    else if (it.type === 'prodotto') prods.push({ p: it, parent: null });
   });
   prods = prods.filter(({ p, parent }) => {
+    const cat = p.category || (parent && parent.category) || '';
     if (activeFilter.startsWith('st:') && p.status !== activeFilter.slice(3)) return false;
-    if (activeFilter.startsWith('cat:') && parent.category !== activeFilter.slice(4)) return false;
+    if (activeFilter.startsWith('cat:') && cat !== activeFilter.slice(4)) return false;
     if (q) {
-      const hay = (p.title+' '+(p.note||'')+' '+(p.statusNote||'')+' '+parent.title+' '+(parent.category||'')).toLowerCase();
+      const hay = (p.title+' '+(p.note||'')+' '+(p.statusNote||'')+' '+cat+' '+(parent ? parent.title : '')+' '+(p.url||'')).toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
